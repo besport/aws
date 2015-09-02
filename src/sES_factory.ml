@@ -145,7 +145,15 @@ let build_member dest dest_type acc =
     ) (acc,1) dest
   in l
 
-let send_email ~creds ?reply_to_addresses ?return_path ~destination ~source ~message () =
+(* sending simple emails ******************************************************)
+
+let send_email
+    ~creds
+    ?reply_to_addresses
+    ?return_path
+    ~destination
+    ~source
+    ~message () =
 
   let build_members dests acc =
     let acc = build_member dests.to_addresses "Destination.ToAddresses" acc in
@@ -157,24 +165,25 @@ let send_email ~creds ?reply_to_addresses ?return_path ~destination ~source ~mes
   in
 
   let build_message message acc =
-    List.fold_left (
-      fun acc ((k,v) as el) ->
+    List.fold_left
+      (fun acc ((k,v) as el) ->
         if v = "" then acc
-        else el::acc
-    ) acc [
-      "Message.Subject.Data", message.subject.data;
-      "Message.Subject.Charset", message.subject.charset;
-      "Message.Body.Text.Data", message.body.text.data;
-      "Message.Body.Text.Charset", message.body.text.charset;
-      "Message.Body.Html.Data", message.body.html.data;
-      "Message.Body.Html.Charset", message.body.html.charset;
-    ]
+        else el::acc)
+      acc
+      [
+        "Message.Subject.Data", message.subject.data;
+        "Message.Subject.Charset", message.subject.charset;
+        "Message.Body.Text.Data", message.body.text.data;
+        "Message.Body.Text.Charset", message.body.text.charset;
+        "Message.Body.Html.Data", message.body.html.data;
+        "Message.Body.Html.Charset", message.body.html.charset;
+      ]
   in
 
   let params =
     build_members destination [
-      ("Action", "SendEmail");
-      ("Source", source);
+      ("Action", "SendEmail") ;
+      ("Source", source) ;
     ]
   in
   let params = build_message message params in
@@ -185,9 +194,11 @@ let send_email ~creds ?reply_to_addresses ?return_path ~destination ~source ~mes
   in
 
   lwt xml = make_request ~creds params in
-  Lwt.return (X.data_of_string "SendEmailResponse.SendEmailResult.MessageId" [ xml ])
+  Lwt.return
+    (X.data_of_string "SendEmailResponse.SendEmailResult.MessageId" [ xml ])
 
-(** /!\ NEVER TESTED /!\ **)
+(* sending raw emails ***********************************************************)
+
 let send_raw_email ~creds ?destinations ?source ~raw_message () =
   let build_members dests acc =
     match dests with
@@ -197,34 +208,38 @@ let send_raw_email ~creds ?destinations ?source ~raw_message () =
 
   let params =
     match source with
-    | Some s -> [("Source", s); ("Action", "SendRawEmail")];
-    | None -> [("Action", "SendRawEmail") ];
+    | Some s -> [ ("Source", s) ; ("Action", "SendRawEmail") ];
+    | None -> [ ("Action", "SendRawEmail") ];
   in
 
   let params = build_members destinations params in
-
+  let raw_message = Netencoding.Base64.encode raw_message in
+  let params = ("RawMessage.Data", raw_message) :: params in
   lwt xml = make_request ~creds params in
-  Lwt.return (X.data_of_string "SendEmailResponse.SendEmailResult.MessageId" [xml])
-
-(* The VerifyEmailAddress action is deprecated as of the May 15, 2012 release of Domain Verification.
-   The VerifyEmailIdentity action is now preferred *)
-(* let verify_email_address ~creds email = *)
-(*   lwt xml = make_request ~creds [ *)
-(*     ("Action", "VerifyEmailAddress"); *)
-(*     ("EmailAddress", email); *)
-(*   ] in *)
-(*   Lwt.return (X.data_of_string "VerifyEmailAddressResponse.ResponseMetadata.RequestId" [xml]) *)
+  Lwt.return (X.data_of_string "SendRawEmailResponse.SendRawEmailResult.MessageId" [xml])
 
 let verify_email_address ~creds email =
-  lwt xml = make_request ~creds [
-    ("Action", "VerifyEmailIdentity");
-    ("EmailAddress", email);
-  ] in
+  lwt xml =
+    make_request ~creds [
+      ("Action", "VerifyEmailIdentity");
+      ("EmailAddress", email);
+    ] in
   Lwt.return (X.data_of_string "VerifyEmailIdentityResponse.ResponseMetadata.RequestId" [xml])
 
-(************** custom function **************)
+(* some helpers ***************************************************************)
 
-let send_basic_email ~creds ?message_text ?bcc ?cc ?charset ?reply_to_addresses ?return_path ~from_ ~to_ ~subject ~message_html () =
+let send_basic_email
+    ~creds
+    ?message_text
+    ?bcc
+    ?cc
+    ?charset
+    ?reply_to_addresses
+    ?return_path
+    ~from_
+    ~to_
+    ~subject
+    ~message_html () =
   let destination = {
     to_addresses = to_ ;
     bcc_addresses = (match bcc with | Some bcc -> bcc | None -> []) ;

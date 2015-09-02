@@ -1,12 +1,16 @@
 (* OASIS_START *)
-(* DO NOT EDIT (digest: 6c963aaa6604b9451c0e3522d389d6a8) *)
-Authors of aws
-Mika Illouz
-William Le Ferrand
-Hugo Heuzard
-Marc Simon
+(* DO NOT EDIT (digest: 953662ddc24e166b4d813942453a6a63) *)
 
-Current maintainers of aws
-Hugo Heuzard <hugo.heuzard@gmail.com>
-William Le Ferrand <warnegia@gmail.com>
+Authors of aws:
+
+* Mika Illouz
+* William Le Ferrand
+* Hugo Heuzard
+* Marc Simon
+
+Current maintainers of aws:
+
+* Hugo Heuzard <hugo.heuzard@gmail.com>
+* William Le Ferrand <warnegia@gmail.com>
+
 (* OASIS_STOP *)
