@@ -1,8 +1,6 @@
 module Make = functor (HC : Aws_sigs.HTTP_CLIENT) ->
   struct
 
-module C = CalendarLib.Calendar
-module P = CalendarLib.Printer.CalendarPrinter
 module X = My_xml
 module Util = Aws_util
 
@@ -49,6 +47,7 @@ let check_error xml =
 let endpoint = "https://email.us-east-1.amazonaws.com/"
 
 let build_ses_header ~creds =
+  Aws_util.reset_calendar_lang ();
   let date = CalendarLib.Printer.Calendar.sprint "%a, %d %b %Y %T %z" (CalendarLib.Calendar.now ()) in
   let hmac_sha1_encoder = (Cryptokit.MAC.hmac_sha1 creds.Creds.aws_secret_access_key) in
   let sign = Cryptokit.hash_string hmac_sha1_encoder date in

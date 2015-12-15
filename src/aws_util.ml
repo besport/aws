@@ -96,6 +96,32 @@ let creds_of_env () = {
 module C = CalendarLib.Calendar
 module P = CalendarLib.Printer.CalendarPrinter
 
+let reset_calendar_lang () =
+  let open CalendarLib.Date in
+  CalendarLib.Printer.day_name :=
+    (function
+     | Sun -> "Sunday"
+     | Mon -> "Monday"
+     | Tue -> "Tuesday"
+     | Wed -> "Wednesday"
+     | Thu -> "Thursday"
+     | Fri -> "Friday"
+     | Sat -> "Saturday");
+  CalendarLib.Printer.month_name :=
+    (function
+     | Jan -> "January"
+     | Feb -> "February"
+     | Mar -> "March"
+     | Apr -> "April"
+     | May -> "May"
+     | Jun -> "June"
+     | Jul -> "July"
+     | Aug -> "August"
+     | Sep -> "September"
+     | Oct -> "October"
+     | Nov -> "November"
+     | Dec -> "December")
+
 (* parse string of the format ["2009-12-04T22:33:47.279Z"], or ["Tue,
    30 Nov 2010 05:02:47 GMT"]; return seconds since Unix epoch. *)
 let unixfloat_of_amz_date_string str =
@@ -113,6 +139,7 @@ let unixfloat_of_amz_date_string str =
 
   with Scanf.Scan_failure _ ->
     (* make a second attempt, now with a different format. ugh *)
+    reset_calendar_lang ();
     C.to_unixfloat (P.from_fstring "%A, %d %b %Y %H:%M:%S GMT" str)
 
 let amz_date_string_of_unixfloat f =
@@ -236,4 +263,3 @@ let make tm_year tm_mon tm_mday tm_hour tm_min tm_sec _ =
    (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 *)
-

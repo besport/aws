@@ -4,8 +4,6 @@
 module Make = functor (HC : Aws_sigs.HTTP_CLIENT) ->
 struct
 
-  module C = CalendarLib.Calendar
-  module P = CalendarLib.Printer.CalendarPrinter
   module X = My_xml
 
 

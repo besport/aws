@@ -63,6 +63,7 @@ let location_constraint_xml_of_region = function
   | `AP_NORTHEAST_1 -> create_bucket_configuration_xml "ap-northeast-1"
 
 let now_as_string () =
+  Aws_util.reset_calendar_lang ();
   P.sprint "%a, %d %b %Y %H:%M:%S GMT" (C.now ())
 
 type amz_acl = [

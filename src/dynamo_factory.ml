@@ -138,7 +138,9 @@ let make_headers ~token ?(version="20111205") action body =
 	       Lwt_unix.sleep 0.1 >>= loop)
       end
     else
-      let date = P.sprint "%a, %d %b %Y %H:%M:%S GMT" (C.now ()) in
+      let date =
+        Aws_util.reset_calendar_lang ();
+        P.sprint "%a, %d %b %Y %H:%M:%S GMT" (C.now ()) in
       let target = Printf.sprintf "DynamoDB_%s.%s" version (string_of_action action) in
       let headers_amz =
 	[
