@@ -9,7 +9,6 @@ module C = CalendarLib.Calendar
 module P = CalendarLib.Printer.CalendarPrinter
 
 open Creds
-module Util = Aws_util
 exception Service_down
 exception Bad_response
 
@@ -182,7 +181,7 @@ let list_none_if_empty name = function
   | l -> Some (name,`List l)
 
 let filter_map_opt name f l =
-  match Util.filter_map f l with
+  match Aws_util.filter_map f l with
     | [] -> None
     | l -> Some (name,`Assoc l)
 
@@ -336,7 +335,7 @@ let create_table ~token ~table ~key ?range ~readlimit ~writelimit () =
     ] in
   let schema =
     let key = Some (make_key "HashKeyElement" key) in
-    let range = Util.option_map (make_key "RangeKeyElement") range in
+    let range = Aws_util.option_map (make_key "RangeKeyElement") range in
     filter_map_opt "KeySchema" ident [key;range] in
   let make_limit name i = Some(name,`Int i) in
   let limits =
@@ -345,7 +344,7 @@ let create_table ~token ~table ~key ?range ~readlimit ~writelimit () =
       ident
       [make_limit "ReadCapacityUnits" readlimit;
        make_limit "WriteCapacityUnits" writelimit] in
-  let json = `Assoc (Util.filter_map ident [Some("TableName", `String table);schema;limits]) in
+  let json = `Assoc (Aws_util.filter_map ident [Some("TableName", `String table);schema;limits]) in
   lwt json = post ~token `CreateTable json in
   match json with
     | `Assoc ["TableDescription",json] -> table_description_of_json json
@@ -359,14 +358,14 @@ let delete_table ~token ~table =
     | _ -> error_of_json json
 
 let update_table ~token ~table ?readlimit ?writelimit () =
-  let make_limit name = Util.option_map (fun i -> name,`Int i) in
+  let make_limit name = Aws_util.option_map (fun i -> name,`Int i) in
   let limits =
     filter_map_opt
       "ProvisionedThroughput"
       ident
       [make_limit "ReadCapacityUnits" readlimit;
        make_limit "WriteCapacityUnits" writelimit] in
-  let json = `Assoc (Util.filter_map ident [Some("TableName", `String table);limits]) in
+  let json = `Assoc (Aws_util.filter_map ident [Some("TableName", `String table);limits]) in
   lwt json = post ~token `UpdateTable json in
   match json with
     | `Assoc ["TableDescription",json] -> table_description_of_json json
@@ -380,9 +379,9 @@ let describe_table ~token ~table =
     | _ -> error_of_json json
 
 let list_tables ~token ?limit ?from () =
-  let json = `Assoc (Util.filter_map ident [
-    Util.option_map (fun i -> "Limit", `Int i) limit;
-    Util.option_map (fun from -> "ExclusiveStartTableName", `String from) from;
+  let json = `Assoc (Aws_util.filter_map ident [
+    Aws_util.option_map (fun i -> "Limit", `Int i) limit;
+    Aws_util.option_map (fun from -> "ExclusiveStartTableName", `String from) from;
   ])
   in
   match_lwt post ~token `ListTables json with
@@ -409,7 +408,7 @@ let put_item ~token ~table ~item ?(expect=[]) ?(return=false) () =
       | `IntValue s ->    ["Value",`Assoc ["I",`String s]])) expect in
   let expect = assoc_none_if_empty "Expected" expect in
   let return = if return then Some ("ReturnValues",`String "ALL_OLD") else None in
-  let json = `Assoc (Util.filter_map ident [Some("TableName", `String table);item;expect;return]) in
+  let json = `Assoc (Aws_util.filter_map ident [Some("TableName", `String table);item;expect;return]) in
   match_lwt post ~token `PutItem json with
     | `Assoc l ->
       let value = try Some (item_of_json (List.assoc "Attributes" l)) with _ -> None in
@@ -425,11 +424,11 @@ let get_item ~token table key ?range ?(select=[]) ?consistent () =
     ] in
   let keys =
     let key = Some (make_key "HashKeyElement" key) in
-    let range = Util.option_map (make_key "RangeKeyElement") range in
+    let range = Aws_util.option_map (make_key "RangeKeyElement") range in
     filter_map_opt "Key" ident [key;range] in
   let get = list_none_if_empty "AttributesToGet" (List.map (fun x -> `String x) select) in
-  let consistent = Util.option_map (fun b -> "ConsistentRead", `Bool b) consistent in
-  let json = `Assoc (Util.filter_map ident [Some("TableName", `String table);keys;get;consistent]) in
+  let consistent = Aws_util.option_map (fun b -> "ConsistentRead", `Bool b) consistent in
+  let json = `Assoc (Aws_util.filter_map ident [Some("TableName", `String table);keys;get;consistent]) in
   match_lwt post ~token `GetItem json with
     | `Assoc l ->
       let value = item_of_json (List.assoc "Item" l) in
@@ -444,12 +443,12 @@ let batch_get_item ~token items =
     ] in
   let make_keys (p,r) =
     let key = Some (make_key "HashKeyElement" p) in
-    let range = Util.option_map (make_key "RangeKeyElement") r in
-    `Assoc (Util.filter_map ident [key;range]) in
+    let range = Aws_util.option_map (make_key "RangeKeyElement") r in
+    `Assoc (Aws_util.filter_map ident [key;range]) in
   let json = `Assoc ["RequestItems",`Assoc
     (List.map (fun (table,keylist,getlist) ->
       table,
-      `Assoc (Util.filter_map ident
+      `Assoc (Aws_util.filter_map ident
 		[
 		  list_none_if_empty "Keys" (List.map make_keys keylist);
 		  list_none_if_empty "AttributesToGet" (List.map (fun x -> `String x) getlist)
@@ -478,7 +477,7 @@ let update_item ~token ~table ~key ?range update ?(expect=[]) ?(return=false) ()
 	name, json_of_value v in
       let keys =
 	let key = Some (make_key "HashKeyElement" key) in
-	let range = Util.option_map (make_key "RangeKeyElement") range in
+	let range = Aws_util.option_map (make_key "RangeKeyElement") range in
 	filter_map_opt "Key" ident [key;range] in
       let expect =
 	List.map (fun (e,p) -> e,`Assoc (match p with
@@ -496,7 +495,7 @@ let update_item ~token ~table ~key ?range update ?(expect=[]) ?(return=false) ()
     (* "Action",`String (string_of_update_action action); *)
 	] in
       let update = assoc_none_if_empty "AttributeUpdates" (List.map make_update update) in
-      let json = `Assoc (Util.filter_map ident [Some ("TableName",`String table);keys;update;expect;return]) in
+      let json = `Assoc (Aws_util.filter_map ident [Some ("TableName",`String table);keys;update;expect;return]) in
       (* debug "update_item: %s" (Yojson.Safe.to_string json); *)
       match_lwt post ~token `UpdateItem json with
 	| `Assoc l ->
@@ -512,7 +511,7 @@ let delete_item ~token table key ?range ?(expect=[]) ?(return=false) () =
     ] in
   let keys =
     let key = Some (make_key "HashKeyElement" key) in
-    let range = Util.option_map (make_key "RangeKeyElement") range in
+    let range = Aws_util.option_map (make_key "RangeKeyElement") range in
     filter_map_opt "Key" ident [key;range] in
   let expect =
     List.map (fun (e,p) -> e,`Assoc (match p with
@@ -521,7 +520,7 @@ let delete_item ~token table key ?range ?(expect=[]) ?(return=false) () =
       | `IntValue s ->    ["Value",`Assoc ["I",`String s]])) expect in
   let expect = assoc_none_if_empty "Expected" expect in
   let return = if return then Some ("ReturnValues",`String "ALL_OLD") else None in
-  let json = `Assoc (Util.filter_map ident [Some("TableName", `String table);keys;expect;return]) in
+  let json = `Assoc (Aws_util.filter_map ident [Some("TableName", `String table);keys;expect;return]) in
   match_lwt post ~token `DeleteItem json with
     | `Assoc l ->
       let value = try Some (item_of_json (List.assoc "Attributes" l)) with _ -> None in
@@ -536,15 +535,15 @@ let delete_item ~token table key ?range ?(expect=[]) ?(return=false) () =
 
 let scan ~token ~table ?(select=[]) ?limit ?from ?count () =
   let make_key (n,t) = `Assoc [ string_of_attr t,`String n ] in
-  let json = `Assoc (Util.filter_map ident [
+  let json = `Assoc (Aws_util.filter_map ident [
     Some ("TableName",`String table);
     list_none_if_empty "AttributesToGet" (List.map (fun x -> `String x) select);
-    Util.option_bind (fun c -> if c then Some ("Count",`Bool true) else None ) count;
-    Util.option_map (fun i -> "Limit", `Int i) limit;
-    Util.option_map (fun (from,range) -> "ExclusiveStartKey", `Assoc (
-      Util.filter_map ident [
+    Aws_util.option_bind (fun c -> if c then Some ("Count",`Bool true) else None ) count;
+    Aws_util.option_map (fun i -> "Limit", `Int i) limit;
+    Aws_util.option_map (fun (from,range) -> "ExclusiveStartKey", `Assoc (
+      Aws_util.filter_map ident [
 	Some ("HashKeyElement", make_key from);
-	Util.option_map (fun range -> "RangeKeyElement",make_key range) range;
+	Aws_util.option_map (fun range -> "RangeKeyElement",make_key range) range;
       ])) from;
   ])
   in
