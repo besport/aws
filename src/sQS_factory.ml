@@ -68,8 +68,7 @@ let signed_request
   let params = ("Signature", signature) :: params in
   sprint "https://%s%s" http_host http_uri, params
 
-
-  let error_msg body =
+  let error_msg body = try
     match X.xml_of_string body with
       | X.E ("Response",_,(X.E ("Errors",_,[X.E ("Error",_,[
         X.E ("Code",_,[X.P code]);
@@ -77,6 +76,11 @@ let signed_request
       ])]))::_) ->
         `Error message
       | _ -> `Error "unknown message"
+  with X.ParseError -> `Error ("cannot parse error response of: " ^ body)
+
+  let http_error_msg (code, _, body) =
+    let `Error msg = error_msg body in
+    `Error (sprint "error response with code %d: %s" code msg)
 
 
 
@@ -225,7 +229,7 @@ let signed_request
   ignore (header) ;
   ignore (body);
   return (`Ok ())
-    with HC.Http_error (_, _, body) -> return (error_msg body)
+    with HC.Http_error e -> return @@ http_error_msg e
 
 (* send a message to a queue *)
 
