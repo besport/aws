@@ -66,7 +66,7 @@ let signed_request
   in
 
   let params = ("Signature", signature) :: params in
-  (http_host ^ http_uri), params
+  sprint "https://%s%s" http_host http_uri, params
 
 
   let error_msg body =
