@@ -111,16 +111,29 @@ let signed_request
         receipt_handle : string ;
         body : string }
 
-  let message_of_xml encoded = function
-    | X.E ("Message",
-           _,
-           X.E ("MessageId", _, [ X.P message_id ])
-           :: X.E ("ReceiptHandle", _, [ X.P receipt_handle ])
-           :: X.E ("MD5OfBody", _ , _)
-           :: X.E ("Body", _, [ X.P body ]) :: attributes
-    ) -> { message_id ; receipt_handle ; body = (if encoded then Util.base64_decoder body else body) }
-
-    | _ -> raise (Error "ReceiveMessageResult.message")
+  let message_of_xml encoded xml =
+    let message_id = ref None in
+    let receipt_handle = ref None in
+    let body = ref None in
+    let process_tag = function
+      | X.E ("MessageId", _, [ X.P m ]) -> message_id := Some m
+      | X.E ("ReceiptHandle", _, [ X.P r ]) -> receipt_handle := Some r
+      | X.E ("Body", _, [ X.P b ]) -> body :=
+                             Some (if encoded then Util.base64_decoder b else b)
+      | X.E ("MD5OfBody", _ , _) -> () (*TODO: actually check?*)
+      | _ -> ()
+    in
+    let fail () = raise
+      (Error ("ReceiveMessageResult.message: " ^ X.string_of_xml xml)) in
+    let (>>=) x f = match x with | Some x -> f x | None -> fail () in
+    match xml with
+    | X.E ("Message", _, tags) ->
+        ignore (List.map process_tag tags);
+        !message_id >>= fun message_id ->
+        !receipt_handle >>= fun receipt_handle ->
+        !body >>= fun body ->
+        { message_id ; receipt_handle ; body }
+    | _ -> fail ()
 
   let receive_message_response_of_xml ~encoded = function
     | X.E ("ReceiveMessageResponse",
