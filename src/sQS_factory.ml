@@ -20,7 +20,6 @@ struct
 
 (* copy/paste from EC2; barko you want to move to Util? *)
 
-
   let signed_request
       ?region
       ?(http_method=`POST)
@@ -66,26 +65,16 @@ struct
     in
 
     let params = ("Signature", signature) :: params in
-    (* List.iter (fun (x,y) -> print_endline (x ^ ": " ^ y)) params; *)
     let url = sprint "https://%s%s" http_host http_uri in
-    HC.post ~body:(`String (Util.encode_post_url params)) url
-
-
-
-
-  let error_msg body = try
-    match X.xml_of_string body with
-      | X.E ("Response",_,(X.E ("Errors",_,[X.E ("Error",_,[
-        X.E ("Code",_,[X.P code]);
-        X.E ("Message",_,[X.P message])])]))::_) -> `Error message
-      | _ -> `Error ("unknown message: " ^ body)
-  with X.ParseError -> `Error ("cannot parse error response: " ^ body)
-
-  let http_error_msg (code, _, body) =
-    let `Error msg = error_msg body in
-    `Error (sprint "error response with code %d: %s" code msg)
-
-
+    try_lwt HC.post ~body:(`String (Util.encode_post_url params)) url
+    with HC.Http_error (code, headers, body) ->
+      let msg = try match X.xml_of_string body with
+        | X.E ("Response",_,(X.E ("Errors",_,[X.E ("Error",_,[
+          X.E ("Code",_,[X.P code]);
+          X.E ("Message",_,[X.P message])])]))::_) -> message
+        | _ -> body
+        with X.ParseError -> body
+      in raise (Error (sprint "HTTP %d: %s" code msg))
 
 (* xml handling utilities *)
   let queue_url_of_xml = function
@@ -93,14 +82,6 @@ struct
     | _ ->
       raise (Error ("QueueUrlResponse"))
 
-  let list_queues_response_of_xml = function
-    | X.E("ListQueuesResponse", _, [
-      X.E("ListQueuesResult",_,items) ;
-      _ ;
-    ]) ->
-      List.map queue_url_of_xml items
-    | _ ->
-      raise (Error "ListQueuesRequestsResponse")
 
   let create_queue_response_of_xml = function
     | X.E("CreateQueueResponse", _, kids) -> (
@@ -142,14 +123,6 @@ struct
         { message_id ; receipt_handle ; body }
     | _ -> fail ()
 
-  let receive_message_response_of_xml ~encoded = function
-    | X.E ("ReceiveMessageResponse",
-           _,
-           [
-             X.E("ReceiveMessageResult",_ , items) ;
-             _ ;
-           ]) -> List.map (message_of_xml encoded) items
-
     | x -> raise (Error (X.string_of_xml x))
 
   let send_message_response_of_xml = function
@@ -166,24 +139,16 @@ struct
 
     | _ -> raise (Error "SendMessageResponse")
 
-
-(* create queue *)
   let create_queue ?region ?(default_visibility_timeout=30) creds queue_name =
+    lwt header, body = signed_request ?region ~http_uri:("/") creds
+        [
+          "Action", "CreateQueue" ;
+          "QueueName", queue_name ;
+          "DefaultVisibilityTimeout", string_of_int default_visibility_timeout ;
+        ] in
+    let xml = X.xml_of_string body in
+    return (create_queue_response_of_xml xml)
 
-  lwt header, body = signed_request ?region ~http_uri:("/") creds
-      [
-        "Action", "CreateQueue" ;
-        "QueueName", queue_name ;
-        "DefaultVisibilityTimeout", string_of_int default_visibility_timeout ;
-      ] in
-    try_lwt
-
-
-  let xml = X.xml_of_string body in
-  return (`Ok (create_queue_response_of_xml xml))
-  with HC.Http_error (code, _, body) -> print "Error %d %s\n" code body ; return (error_msg body)
-
-(* list existing queues *)
   let list_queues ?region ?prefix creds =
 
   lwt header, body = signed_request ?region ~http_uri:("/") creds
@@ -191,13 +156,19 @@ struct
        :: (match prefix with
            None -> []
          | Some prefix -> [ "QueueNamePrefix", prefix ])) in
-    try_lwt
 
   let xml = X.xml_of_string body in
-  return (`Ok (list_queues_response_of_xml xml))
-    with HC.Http_error (code, _, body) -> print "Error %d %s\n" code body ; return (error_msg body)
+  let list_queues_response_of_xml = function
+    | X.E("ListQueuesResponse", _, [
+      X.E("ListQueuesResult",_,items) ;
+      _ ;
+    ]) ->
+      List.map queue_url_of_xml items
+    | _ ->
+      raise (Error "ListQueuesRequestsResponse")
+  in
+  return (list_queues_response_of_xml xml)
 
-(* get messages from a queue *)
   let receive_message ?region ?(attribute_name="All") ?(max_number_of_messages=1)
                       ?(visibility_timeout=30) ?(encoded=true) creds queue_url =
   lwt header, body = signed_request ?region creds ~http_uri:queue_url
@@ -207,13 +178,16 @@ struct
         "MaxNumberOfMessages", string_of_int max_number_of_messages ;
         "VisibilityTimeout", string_of_int visibility_timeout ;
       ] in
-    try_lwt
-
   let xml = X.xml_of_string body in
-  return (`Ok (receive_message_response_of_xml ~encoded xml))
-  with HC.Http_error (_, _, body) -> return (error_msg body)
-
-(* delete a message from a queue *)
+  let receive_message_response_of_xml ~encoded = function
+    | X.E ("ReceiveMessageResponse",
+           _,
+           [
+             X.E("ReceiveMessageResult",_ , items) ;
+             _ ;
+           ]) -> List.map (message_of_xml encoded) items
+  in
+  return (receive_message_response_of_xml ~encoded xml)
 
   let delete_message ?region creds queue_url receipt_handle =
   lwt header, body = signed_request ?region creds ~http_uri:queue_url
@@ -221,13 +195,9 @@ struct
         "Action", "DeleteMessage" ;
         "ReceiptHandle", receipt_handle
       ] in
-    try_lwt
   ignore (header) ;
   ignore (body);
-  return (`Ok ())
-    with HC.Http_error e -> return @@ http_error_msg e
-
-(* send a message to a queue *)
+  return ()
 
   let send_message ?region creds queue_url ?(encoded=true) body =
   lwt header, body = signed_request ?region creds ~http_uri:queue_url
@@ -235,9 +205,6 @@ struct
         "Action", "SendMessage" ;
         "MessageBody", (if encoded then Util.base64 body else body)
       ] in
-    try_lwt
-
   let xml = X.xml_of_string body in
-  return (`Ok (send_message_response_of_xml xml))
-  with HC.Http_error (_, _, body) ->  return (error_msg body)
+  return (send_message_response_of_xml xml)
 end
