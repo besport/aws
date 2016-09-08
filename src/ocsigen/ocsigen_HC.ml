@@ -107,11 +107,15 @@ let call ?(headers=[]) ?(body=`None) ~http_method url =
          Http_header.Answer code;
        headers} -> Lwt.return code
     | _ -> Lwt.fail @@ Http_error (0, [], "no HTTP code found")
-  in
-  begin match code with
+  in match code with
     | 200 | 201 -> Lwt.return resp
-    | _ -> Lwt.fail @@ Http_error (code, extract_headers resp, "")
-  end
+    | _ ->
+      lwt msg = match resp.frame_content with
+        | None -> Lwt.return ""
+        | Some stream -> Lwt.finalize
+          (fun () -> Ocsigen_stream.string_of_stream 16384 (Ocsigen_stream.get stream))
+          (fun () -> Ocsigen_stream.finalize stream `Success)
+      in Lwt.fail @@ Http_error (code, extract_headers resp, msg)
 
 let get ?headers url =
   call ?headers ~http_method:Http_header.GET url

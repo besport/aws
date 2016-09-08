@@ -66,17 +66,16 @@ let signed_request
   in
 
   let params = ("Signature", signature) :: params in
+  (* List.iter (fun (x,y) -> print_endline (x ^ ": " ^ y)) params; *)
   sprint "https://%s%s" http_host http_uri, params
 
   let error_msg body = try
     match X.xml_of_string body with
       | X.E ("Response",_,(X.E ("Errors",_,[X.E ("Error",_,[
         X.E ("Code",_,[X.P code]);
-        X.E ("Message",_,[X.P message])
-      ])]))::_) ->
-        `Error message
-      | _ -> `Error "unknown message"
-  with X.ParseError -> `Error ("cannot parse error response of: " ^ body)
+        X.E ("Message",_,[X.P message])])]))::_) -> `Error message
+      | _ -> `Error ("unknown message: " ^ body)
+  with X.ParseError -> `Error ("cannot parse error response: " ^ body)
 
   let http_error_msg (code, _, body) =
     let `Error msg = error_msg body in
