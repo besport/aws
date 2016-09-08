@@ -130,7 +130,7 @@ let signed_request
              _ ;
            ]) -> List.map (message_of_xml encoded) items
 
-    | _ -> raise (Error "ReceiveMessageResponse")
+    | x -> raise (Error (X.string_of_xml x))
 
   let send_message_response_of_xml = function
     | X.E ("SendMessageResponse",
@@ -148,9 +148,9 @@ let signed_request
 
 
 (* create queue *)
-  let create_queue ?(default_visibility_timeout=30) creds queue_name =
+  let create_queue ?region ?(default_visibility_timeout=30) creds queue_name =
 
-    let url, params = signed_request ~http_uri:("/") creds
+    let url, params = signed_request ?region ~http_uri:("/") creds
       [
         "Action", "CreateQueue" ;
         "QueueName", queue_name ;
@@ -167,9 +167,9 @@ let signed_request
   with HC.Http_error (code, _, body) -> print "Error %d %s\n" code body ; return (error_msg body)
 
 (* list existing queues *)
-  let list_queues ?prefix creds =
+  let list_queues ?region ?prefix creds =
 
-    let url, params = signed_request ~http_uri:("/") creds
+    let url, params = signed_request ?region ~http_uri:("/") creds
       (("Action", "ListQueues")
        :: (match prefix with
            None -> []
@@ -183,8 +183,9 @@ let signed_request
     with HC.Http_error (code, _, body) -> print "Error %d %s\n" code body ; return (error_msg body)
 
 (* get messages from a queue *)
-  let receive_message ?(attribute_name="All") ?(max_number_of_messages=1) ?(visibility_timeout=30) ?(encoded=true) creds queue_url =
-    let url, params = signed_request creds ~http_uri:queue_url
+  let receive_message ?region ?(attribute_name="All") ?(max_number_of_messages=1)
+                      ?(visibility_timeout=30) ?(encoded=true) creds queue_url =
+    let url, params = signed_request ?region creds ~http_uri:queue_url
       [
         "Action", "ReceiveMessage" ;
         "AttributeName", attribute_name ;
@@ -200,8 +201,8 @@ let signed_request
 
 (* delete a message from a queue *)
 
-  let delete_message creds queue_url receipt_handle =
-    let url, params = signed_request creds ~http_uri:queue_url
+  let delete_message ?region creds queue_url receipt_handle =
+    let url, params = signed_request ?region creds ~http_uri:queue_url
       [
         "Action", "DeleteMessage" ;
         "ReceiptHandle", receipt_handle
@@ -215,8 +216,8 @@ let signed_request
 
 (* send a message to a queue *)
 
-  let send_message creds queue_url ?(encoded=true) body =
-    let url, params = signed_request creds ~http_uri:queue_url
+  let send_message ?region creds queue_url ?(encoded=true) body =
+    let url, params = signed_request ?region creds ~http_uri:queue_url
       [
         "Action", "SendMessage" ;
         "MessageBody", (if encoded then Util.base64 body else body)
