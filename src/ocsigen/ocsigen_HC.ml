@@ -91,7 +91,7 @@ let call ?(headers=[]) ?(body=`None) ~http_method url =
     ~content
     ?content_length
     ~headers
-    ~host:(match port with None -> host | Some p -> host^":"^string_of_int p)
+    ~host
     ~inet_addr
     ~uri
     ()

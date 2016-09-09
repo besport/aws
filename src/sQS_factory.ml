@@ -21,24 +21,20 @@ struct
 (* copy/paste from EC2; barko you want to move to Util? *)
 
   let signed_request
-      ?region
+      ~credentials
+      ~region
       ?(http_method=`POST)
       ?(http_uri="/")
       ?expires_minutes
-      creds
       params =
 
-    let http_host =
-      match region with
-        | Some r -> sprint "sqs.%s.amazonaws.com" r
-        | None -> "sqs.us-east-1.amazonaws.com"
-    in
+    let http_host = sprint "sqs.%s.amazonaws.com" region in
 
     let params =
       ("Version", "2009-02-01" ) ::
         ("SignatureVersion", "2") ::
         ("SignatureMethod", "HmacSHA1") ::
-        ("AWSAccessKeyId", creds.aws_access_key_id) ::
+        ("AWSAccessKeyId", credentials.aws_access_key_id) ::
           params
     in
 
@@ -59,7 +55,7 @@ struct
         uri_query_component
       ]
       in
-      let hmac_sha1_encoder = Cryptokit.MAC.hmac_sha1 creds.aws_secret_access_key in
+      let hmac_sha1_encoder = Cryptokit.MAC.hmac_sha1 credentials.aws_secret_access_key in
       let signed_string = Cryptokit.hash_string hmac_sha1_encoder string_to_sign in
       Util.base64 signed_string
     in
@@ -139,8 +135,8 @@ struct
 
     | _ -> raise (Error "SendMessageResponse")
 
-  let create_queue ?region ?(default_visibility_timeout=30) creds queue_name =
-    lwt header, body = signed_request ?region ~http_uri:("/") creds
+  let create_queue ~credentials ~region ?(default_visibility_timeout=30) queue_name =
+    lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
         [
           "Action", "CreateQueue" ;
           "QueueName", queue_name ;
@@ -149,9 +145,9 @@ struct
     let xml = X.xml_of_string body in
     return (create_queue_response_of_xml xml)
 
-  let list_queues ?region ?prefix creds =
+  let list_queues ~credentials ~region ?prefix =
 
-  lwt header, body = signed_request ?region ~http_uri:("/") creds
+  lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
       (("Action", "ListQueues")
        :: (match prefix with
            None -> []
@@ -169,9 +165,10 @@ struct
   in
   return (list_queues_response_of_xml xml)
 
-  let receive_message ?region ?(attribute_name="All") ?(max_number_of_messages=1)
-                      ?(visibility_timeout=30) ?(encoded=true) creds queue_url =
-  lwt header, body = signed_request ?region creds ~http_uri:queue_url
+  let receive_message ~credentials ~region ?(attribute_name="All")
+                      ?(max_number_of_messages=1) ?(visibility_timeout=30)
+                      ?(encoded=true) queue_url =
+  lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
       [
         "Action", "ReceiveMessage" ;
         "AttributeName", attribute_name ;
@@ -189,8 +186,8 @@ struct
   in
   return (receive_message_response_of_xml ~encoded xml)
 
-  let delete_message ?region creds queue_url receipt_handle =
-  lwt header, body = signed_request ?region creds ~http_uri:queue_url
+  let delete_message ~credentials ~region queue_url receipt_handle =
+  lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
       [
         "Action", "DeleteMessage" ;
         "ReceiptHandle", receipt_handle
@@ -199,8 +196,8 @@ struct
   ignore (body);
   return ()
 
-  let send_message ?region creds queue_url ?(encoded=true) body =
-  lwt header, body = signed_request ?region creds ~http_uri:queue_url
+  let send_message ~credentials ~region queue_url ?(encoded=true) body =
+  lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
       [
         "Action", "SendMessage" ;
         "MessageBody", (if encoded then Util.base64 body else body)
