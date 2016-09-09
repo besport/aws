@@ -148,7 +148,7 @@ struct
       let (>>=) x f = match x with | Some x -> f x | None -> fail () in
       match xml with
       | X.E ("Message", _, tags) ->
-          ignore (List.map process_tag tags);
+          List.iter process_tag tags;
           !message_id >>= fun message_id ->
           !receipt_handle >>= fun receipt_handle ->
           !body >>= fun body ->
@@ -183,18 +183,24 @@ struct
           "MessageBody", (if encoded then Util.base64 body else body)
         ] in
     let xml = X.xml_of_string body in
-    let send_message_response_of_xml = function
-      | X.E ("SendMessageResponse",
-             _,
-             [
-               X.E("SendMessageResult",_ ,
-                   [
-                     X.E ("MD5OfMessageBody", _, _) ;
-                     X.E ("MessageId", _, [ X.P message_id ])
-                   ]) ;
-               _ ;
-             ]) -> message_id
-      | _ -> raise (Error ("SendMessageResponse: " ^ body))
+    let send_message_response_of_xml xml =
+      let fail () = raise (Error ("SendMessageResponse: " ^ X.string_of_xml xml)) in
+      let (>>=) x f = match x with | Some x -> f x | None -> fail () in
+      let message_id = ref None in
+      let process_tag = function
+        | X.E ("MessageId", _, [ X.P mid ]) -> message_id := Some mid
+        | X.E ("MD5OfMessageBody", _, _) -> (); (*TODO: actually check?*)
+        | _ -> ()
+      in
+      let process_tag = function
+        | X.E ("SendMessageResult", _, tags) -> List.iter process_tag tags;
+        | _ -> ()
+      in
+      match xml with
+        | X.E ("SendMessageResponse", _, tags) ->
+            List.iter process_tag tags;
+            !message_id >>= fun message_id -> message_id
+        | _ -> fail ()
     in
     return (send_message_response_of_xml xml)
 end
