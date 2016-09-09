@@ -72,68 +72,10 @@ struct
         with X.ParseError -> body
       in raise (Error (sprint "HTTP %d: %s" code msg))
 
-(* xml handling utilities *)
-  let queue_url_of_xml = function
-    | X.E ("QueueUrl",_ , [ X.P url ]) -> url
-    | _ ->
-      raise (Error ("QueueUrlResponse"))
-
-
-  let create_queue_response_of_xml = function
-    | X.E("CreateQueueResponse", _, kids) -> (
-      match kids with
-        | [_ ; X.E ("QueueUrl",_, [ X.P url ])] -> (
-          url
-        )
-        | _ -> raise (Error "CreateQueueResponse.queueurl")
-    )
-    | _ -> raise (Error "CreateQueueResponse")
-
-  type message =
-      {
+  type message = {
         message_id : string ;
         receipt_handle : string ;
         body : string }
-
-  let message_of_xml encoded xml =
-    let message_id = ref None in
-    let receipt_handle = ref None in
-    let body = ref None in
-    let process_tag = function
-      | X.E ("MessageId", _, [ X.P m ]) -> message_id := Some m
-      | X.E ("ReceiptHandle", _, [ X.P r ]) -> receipt_handle := Some r
-      | X.E ("Body", _, [ X.P b ]) -> body :=
-                             Some (if encoded then Util.base64_decoder b else b)
-      | X.E ("MD5OfBody", _ , _) -> () (*TODO: actually check?*)
-      | _ -> ()
-    in
-    let fail () = raise
-      (Error ("ReceiveMessageResult.message: " ^ X.string_of_xml xml)) in
-    let (>>=) x f = match x with | Some x -> f x | None -> fail () in
-    match xml with
-    | X.E ("Message", _, tags) ->
-        ignore (List.map process_tag tags);
-        !message_id >>= fun message_id ->
-        !receipt_handle >>= fun receipt_handle ->
-        !body >>= fun body ->
-        { message_id ; receipt_handle ; body }
-    | _ -> fail ()
-
-    | x -> raise (Error (X.string_of_xml x))
-
-  let send_message_response_of_xml = function
-    | X.E ("SendMessageResponse",
-           _,
-           [
-             X.E("SendMessageResult",_ ,
-                 [
-                   X.E ("MD5OfMessageBody", _, _) ;
-                   X.E ("MessageId", _, [ X.P message_id ])
-                 ]) ;
-             _ ;
-           ]) -> message_id
-
-    | _ -> raise (Error "SendMessageResponse")
 
   let create_queue ~credentials ~region ?(default_visibility_timeout=30) queue_name =
     lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
@@ -143,65 +85,116 @@ struct
           "DefaultVisibilityTimeout", string_of_int default_visibility_timeout ;
         ] in
     let xml = X.xml_of_string body in
+    let create_queue_response_of_xml = function
+      | X.E("CreateQueueResponse", _, kids) -> (
+        match kids with
+          | [_ ; X.E ("QueueUrl",_, [ X.P url ])] -> (
+            url
+          )
+          | _ -> raise (Error "CreateQueueResponse.queueurl")
+      )
+      | _ -> raise (Error "CreateQueueResponse")
+    in
     return (create_queue_response_of_xml xml)
 
   let list_queues ~credentials ~region ?prefix =
+    lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
+        (("Action", "ListQueues")
+         :: (match prefix with
+             None -> []
+           | Some prefix -> [ "QueueNamePrefix", prefix ])) in
 
-  lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
-      (("Action", "ListQueues")
-       :: (match prefix with
-           None -> []
-         | Some prefix -> [ "QueueNamePrefix", prefix ])) in
-
-  let xml = X.xml_of_string body in
-  let list_queues_response_of_xml = function
-    | X.E("ListQueuesResponse", _, [
-      X.E("ListQueuesResult",_,items) ;
-      _ ;
-    ]) ->
-      List.map queue_url_of_xml items
-    | _ ->
-      raise (Error "ListQueuesRequestsResponse")
-  in
-  return (list_queues_response_of_xml xml)
+    let xml = X.xml_of_string body in
+    let queue_url_of_xml = function
+      | X.E ("QueueUrl",_ , [ X.P url ]) -> url
+      | _ ->
+        raise (Error ("QueueUrlResponse"))
+    in
+    let list_queues_response_of_xml = function
+      | X.E("ListQueuesResponse", _, [
+        X.E("ListQueuesResult",_,items) ;
+        _ ;
+      ]) ->
+        List.map queue_url_of_xml items
+      | _ ->
+        raise (Error "ListQueuesRequestsResponse")
+    in
+    return (list_queues_response_of_xml xml)
 
   let receive_message ~credentials ~region ?(attribute_name="All")
                       ?(max_number_of_messages=1) ?(visibility_timeout=30)
                       ?(encoded=true) queue_url =
-  lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
-      [
-        "Action", "ReceiveMessage" ;
+    lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
+      [ "Action", "ReceiveMessage" ;
         "AttributeName", attribute_name ;
         "MaxNumberOfMessages", string_of_int max_number_of_messages ;
         "VisibilityTimeout", string_of_int visibility_timeout ;
       ] in
-  let xml = X.xml_of_string body in
-  let receive_message_response_of_xml ~encoded = function
-    | X.E ("ReceiveMessageResponse",
-           _,
-           [
-             X.E("ReceiveMessageResult",_ , items) ;
-             _ ;
-           ]) -> List.map (message_of_xml encoded) items
-  in
-  return (receive_message_response_of_xml ~encoded xml)
+    let xml = X.xml_of_string body in
+    let message_of_xml encoded xml =
+      let message_id = ref None in
+      let receipt_handle = ref None in
+      let body = ref None in
+      let process_tag = function
+        | X.E ("MessageId", _, [ X.P m ]) -> message_id := Some m
+        | X.E ("ReceiptHandle", _, [ X.P r ]) -> receipt_handle := Some r
+        | X.E ("Body", _, [ X.P b ]) -> body :=
+                               Some (if encoded then Util.base64_decoder b else b)
+        | X.E ("MD5OfBody", _ , _) -> () (*TODO: actually check?*)
+        | _ -> ()
+      in
+      let fail () = raise
+        (Error ("ReceiveMessageResult.message: " ^ X.string_of_xml xml)) in
+      let (>>=) x f = match x with | Some x -> f x | None -> fail () in
+      match xml with
+      | X.E ("Message", _, tags) ->
+          ignore (List.map process_tag tags);
+          !message_id >>= fun message_id ->
+          !receipt_handle >>= fun receipt_handle ->
+          !body >>= fun body ->
+          { message_id ; receipt_handle ; body }
+      | _ -> fail ()
+      | x -> raise (Error (X.string_of_xml x))
+    in
+    let receive_message_response_of_xml ~encoded = function
+      | X.E ("ReceiveMessageResponse",
+             _,
+             [
+               X.E("ReceiveMessageResult",_ , items) ;
+               _ ;
+             ]) -> List.map (message_of_xml encoded) items
+    in
+    return (receive_message_response_of_xml ~encoded xml)
 
   let delete_message ~credentials ~region queue_url receipt_handle =
-  lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
-      [
-        "Action", "DeleteMessage" ;
-        "ReceiptHandle", receipt_handle
-      ] in
-  ignore (header) ;
-  ignore (body);
-  return ()
+    lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
+        [
+          "Action", "DeleteMessage" ;
+          "ReceiptHandle", receipt_handle
+        ] in
+    ignore (header) ;
+    ignore (body);
+    return ()
 
   let send_message ~credentials ~region queue_url ?(encoded=true) body =
-  lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
-      [
-        "Action", "SendMessage" ;
-        "MessageBody", (if encoded then Util.base64 body else body)
-      ] in
-  let xml = X.xml_of_string body in
-  return (send_message_response_of_xml xml)
+    lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
+        [
+          "Action", "SendMessage" ;
+          "MessageBody", (if encoded then Util.base64 body else body)
+        ] in
+    let xml = X.xml_of_string body in
+    let send_message_response_of_xml = function
+      | X.E ("SendMessageResponse",
+             _,
+             [
+               X.E("SendMessageResult",_ ,
+                   [
+                     X.E ("MD5OfMessageBody", _, _) ;
+                     X.E ("MessageId", _, [ X.P message_id ])
+                   ]) ;
+               _ ;
+             ]) -> message_id
+      | _ -> raise (Error ("SendMessageResponse: " ^ body))
+    in
+    return (send_message_response_of_xml xml)
 end
