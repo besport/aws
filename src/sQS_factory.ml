@@ -154,7 +154,6 @@ struct
           !body >>= fun body ->
           { message_id ; receipt_handle ; body }
       | _ -> fail ()
-      | x -> raise (Error (X.string_of_xml x))
     in
     let receive_message_response_of_xml ~encoded = function
       | X.E ("ReceiveMessageResponse",
