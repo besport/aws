@@ -9,11 +9,14 @@ type request_body =  [ `InChannel of int * Lwt_io.input_channel
 
 exception Http_error of (int * headers * string)
 
-let extract_headers frame =
-  let headers = Ocsigen_http_frame.Http_header.get_headers frame.frame_header in
+let convert_headers headers =
   Http_headers.fold (fun s l acc ->
     let s = Http_headers.name_to_string s in
     (List.map (fun v -> (s,v)) l) @ acc) headers []
+
+let extract_headers frame =
+  let headers = Http_header.get_headers frame.frame_header in
+  convert_headers headers
 
 let extract_content frame =
   let header = extract_headers frame in
@@ -81,39 +84,59 @@ let call ?(headers=[]) ?(body=`None) ~http_method url =
       Http_headers.empty headers
     in
   content >>= fun content ->
-  Ocsigen_http_client.raw_request
+  lwt resp = try_lwt Ocsigen_http_client.raw_request
     ?https
     ?port
     ~http_method:http_method
     ~content
     ?content_length
     ~headers
-    ~host:(match port with None -> host | Some p -> host^":"^string_of_int p)
+    ~host
     ~inet_addr
     ~uri
     ()
     ()
+    with Http_error.Http_exception (code, msg, headers) ->
+      Lwt.fail (Http_error
+        (code,
+         (match headers with Some xs -> convert_headers xs | None -> []),
+         (match msg with | Some msg -> msg | None -> "")))
+  in
+  lwt code = match resp.frame_header with
+    | {Http_header.mode =
+         Http_header.Answer code;
+       headers} -> Lwt.return code
+    | _ -> Lwt.fail @@ Http_error (0, [], "no HTTP code found")
+  in match code with
+    | 200 | 201 -> Lwt.return resp
+    | _ ->
+      lwt msg = match resp.frame_content with
+        | None -> Lwt.return ""
+        | Some stream -> Lwt.finalize
+          (fun () -> Ocsigen_stream.string_of_stream 16384 (Ocsigen_stream.get stream))
+          (fun () -> Ocsigen_stream.finalize stream `Success)
+      in Lwt.fail @@ Http_error (code, extract_headers resp, msg)
 
 let get ?headers url =
-  call ?headers ~http_method:Ocsigen_http_frame.Http_header.GET url
+  call ?headers ~http_method:Http_header.GET url
   >>= extract_content
 
 let get_to_chan ?headers url chan =
-  call ?headers ~http_method:Ocsigen_http_frame.Http_header.GET url
+  call ?headers ~http_method:Http_header.GET url
   >>= extract_content_to_chan chan
 
 let post ?headers ?(body=`None) url =
-  call ?headers ~body ~http_method:Ocsigen_http_frame.Http_header.POST url
+  call ?headers ~body ~http_method:Http_header.POST url
   >>= extract_content
 
 let put ?headers ?(body=`None) url =
-  call ?headers ~body ~http_method:Ocsigen_http_frame.Http_header.PUT url
+  call ?headers ~body ~http_method:Http_header.PUT url
   >>= extract_content
 
 let delete ?headers url =
-  call ?headers ~http_method:Ocsigen_http_frame.Http_header.DELETE url
+  call ?headers ~http_method:Http_header.DELETE url
   >>= extract_content
 
 let head ?headers url =
-  call ?headers ~http_method:Ocsigen_http_frame.Http_header.HEAD url
+  call ?headers ~http_method:Http_header.HEAD url
   >>= extract_content
