@@ -1,15 +1,23 @@
 (* SQS API *)
 (* william@corefarm.com *)
 
-module Make = functor (HC : Aws_sigs.HTTP_CLIENT) ->
-struct
+let (@:) x xs = x :: xs
+let (@?) x xs = match x with
+  | (y, None) -> xs
+  | (y, Some z) -> (y,z) :: xs
+
+module Opt = struct
+  let map f = function
+    | None -> None
+    | Some x -> Some (f x)
+end
+
+
+module Make = functor (HC : Aws_sigs.HTTP_CLIENT) -> struct
+
   module X = My_xml
-
-
-
   open Lwt
   open Creds
-
   module Util = Aws_util
 
 
@@ -32,16 +40,15 @@ struct
 
     let params =
       ("Version", "2009-02-01" ) ::
-        ("SignatureVersion", "2") ::
-        ("SignatureMethod", "HmacSHA1") ::
-        ("AWSAccessKeyId", credentials.aws_access_key_id) ::
-          params
+      ("SignatureVersion", "2") ::
+      ("SignatureMethod", "HmacSHA1") ::
+      ("AWSAccessKeyId", credentials.aws_access_key_id) ::
+      params
     in
 
-    let params =
-      match expires_minutes with
-        | Some i -> ("Expires", Util.minutes_from_now i) :: params
-        | None -> ("Timestamp", Util.now_as_string ()) :: params
+    let params = match expires_minutes with
+      | Some i -> ("Expires", Util.minutes_from_now i) :: params
+      | None -> ("Timestamp", Util.now_as_string ()) :: params
     in
 
     let signature =
@@ -50,7 +57,7 @@ struct
       let uri_query_component = String.concat "&" key_equals_value in
       let string_to_sign = String.concat "\n" [
         Util.string_of_t http_method ;
-        String.lowercase http_host ;
+        String.lowercase_ascii http_host ;
         http_uri ;
         uri_query_component
       ]
@@ -73,64 +80,61 @@ struct
       in raise (Error (sprint "HTTP %d: %s" code msg))
 
   type message = {
-        message_id : string ;
-        receipt_handle : string ;
-        body : string }
+    message_id : string ;
+    receipt_handle : string ;
+    body : string
+  }
 
-  let create_queue ~credentials ~region ?(default_visibility_timeout=30) queue_name =
+  let create_queue ~credentials ~region ?visibility_timeout name =
     lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
-        [
-          "Action", "CreateQueue" ;
-          "QueueName", queue_name ;
-          "DefaultVisibilityTimeout", string_of_int default_visibility_timeout ;
-        ] in
+      @@ ("Action", "CreateQueue")
+      @: ("QueueName", name)
+      @: ("VisibilityTimeout", Opt.map string_of_int visibility_timeout)
+      @? [] in
     let xml = X.xml_of_string body in
     let create_queue_response_of_xml = function
       | X.E("CreateQueueResponse", _, kids) -> (
         match kids with
-          | [_ ; X.E ("QueueUrl",_, [ X.P url ])] -> (
-            url
-          )
+          | [_ ; X.E ("QueueUrl",_, [ X.P url ])] -> url
           | _ -> raise (Error "CreateQueueResponse.queueurl")
       )
       | _ -> raise (Error "CreateQueueResponse")
     in
     return (create_queue_response_of_xml xml)
 
-  let list_queues ~credentials ~region ?prefix =
+  let list_queues ~credentials ~region ?prefix () =
     lwt header, body = signed_request ~credentials ~region ~http_uri:("/")
-        (("Action", "ListQueues")
-         :: (match prefix with
-             None -> []
-           | Some prefix -> [ "QueueNamePrefix", prefix ])) in
+      @@ ("Action", "ListQueues")
+      @: ("QueueNamePrefix", prefix)
+      @? [] in
 
     let xml = X.xml_of_string body in
     let queue_url_of_xml = function
       | X.E ("QueueUrl",_ , [ X.P url ]) -> url
-      | _ ->
-        raise (Error ("QueueUrlResponse"))
+      | _ -> raise (Error ("QueueUrlResponse"))
     in
     let list_queues_response_of_xml = function
       | X.E("ListQueuesResponse", _, [
         X.E("ListQueuesResult",_,items) ;
         _ ;
-      ]) ->
-        List.map queue_url_of_xml items
-      | _ ->
-        raise (Error "ListQueuesRequestsResponse")
+      ]) -> List.map queue_url_of_xml items
+      | _ -> raise (Error "ListQueuesRequestsResponse")
     in
     return (list_queues_response_of_xml xml)
 
-  let receive_message ~credentials ~region ?(attribute_name="All")
-                      ?(max_number_of_messages=1) ?(visibility_timeout=30)
-                      ?(encoded=true) queue_url =
+  let receive_message ~credentials ~region
+      ?(all_attributes = false) ?max_number_of_messages
+      ?visibility_timeout ?(encoded=true)
+      queue_url =
     lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
-      [ "Action", "ReceiveMessage" ;
-        "AttributeName", attribute_name ;
-        "MaxNumberOfMessages", string_of_int max_number_of_messages ;
-        "VisibilityTimeout", string_of_int visibility_timeout ;
-      ] in
+      @@ ("Action", "ReceiveMessage")
+      @: ("AttributeName", if all_attributes then Some "All" else None)
+      @? ("MaxNumberOfMessages", Opt.map string_of_int max_number_of_messages)
+      @? ("VisibilityTimeout", Opt.map string_of_int visibility_timeout)
+      @? [] in
     let xml = X.xml_of_string body in
+    let fail () = raise
+      (Error ("ReceiveMessageResult.message: " ^ X.string_of_xml xml)) in
     let message_of_xml encoded xml =
       let message_id = ref None in
       let receipt_handle = ref None in
@@ -143,8 +147,6 @@ struct
         | X.E ("MD5OfBody", _ , _) -> () (*TODO: actually check?*)
         | _ -> ()
       in
-      let fail () = raise
-        (Error ("ReceiveMessageResult.message: " ^ X.string_of_xml xml)) in
       let (>>=) x f = match x with | Some x -> f x | None -> fail () in
       match xml with
       | X.E ("Message", _, tags) ->
@@ -162,25 +164,19 @@ struct
                X.E("ReceiveMessageResult",_ , items) ;
                _ ;
              ]) -> List.map (message_of_xml encoded) items
+      | _ -> fail ()
     in
     return (receive_message_response_of_xml ~encoded xml)
 
   let delete_message ~credentials ~region queue_url receipt_handle =
-    lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
-        [
-          "Action", "DeleteMessage" ;
-          "ReceiptHandle", receipt_handle
-        ] in
-    ignore (header) ;
-    ignore (body);
+    lwt _ = signed_request ~credentials ~region ~http_uri:queue_url
+        [ "Action", "DeleteMessage" ; "ReceiptHandle", receipt_handle ] in
     return ()
 
   let send_message ~credentials ~region queue_url ?(encoded=true) body =
     lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
-        [
-          "Action", "SendMessage" ;
-          "MessageBody", (if encoded then Util.base64 body else body)
-        ] in
+        [ "Action", "SendMessage" ;
+          "MessageBody", (if encoded then Util.base64 body else body) ] in
     let xml = X.xml_of_string body in
     let send_message_response_of_xml xml =
       let fail () = raise (Error ("SendMessageResponse: " ^ X.string_of_xml xml)) in
