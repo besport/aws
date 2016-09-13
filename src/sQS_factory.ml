@@ -124,13 +124,15 @@ module Make = functor (HC : Aws_sigs.HTTP_CLIENT) -> struct
 
   let receive_message ~credentials ~region
       ?(all_attributes = false) ?max_number_of_messages
-      ?visibility_timeout ?(encoded=true)
+      ?visibility_timeout ?wait_time_seconds
+      ?(encoded=true)
       queue_url =
     lwt header, body = signed_request ~credentials ~region ~http_uri:queue_url
       @@ ("Action", "ReceiveMessage")
       @: ("AttributeName", if all_attributes then Some "All" else None)
       @? ("MaxNumberOfMessages", Opt.map string_of_int max_number_of_messages)
       @? ("VisibilityTimeout", Opt.map string_of_int visibility_timeout)
+      @? ("WaitTimeSeconds", Opt.map string_of_int wait_time_seconds)
       @? [] in
     let xml = X.xml_of_string body in
     let fail () = raise
