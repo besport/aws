@@ -68,10 +68,20 @@ let make_request ~creds post_params =
     ("Timestamp", ses_timestamp ())
   ] @ post_params in
   let body = `String (Util.encode_post_url post_params) in
-  lwt _,s = HC.post ~headers ~body endpoint in
-  let xml = X.xml_of_string s in
-  check_error xml ;
-  Lwt.return xml
+  Lwt.try_bind
+    (fun () -> HC.post ~headers ~body endpoint)
+    (fun (_,s) ->
+       let xml = X.xml_of_string s in
+       Lwt.return xml)
+    (fun e ->
+       begin match e with
+       | HC.Http_error (_, _, body) ->
+           let xml = X.xml_of_string body in
+           check_error xml
+       |  _ -> ()
+       end;
+       Lwt.fail e)
+
 
 (****************  SES METHODE ****************)
 
