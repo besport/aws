@@ -238,7 +238,7 @@ let send_basic_email
     ~from_
     ~to_
     ~subject
-    ~message_html () =
+    ?message_html () =
   let destination = {
     to_addresses = to_ ;
     bcc_addresses = (match bcc with | Some bcc -> bcc | None -> []) ;
@@ -250,7 +250,8 @@ let send_basic_email
   let message = {
     subject = { charset; data = subject } ;
     body = {
-      html = { charset; data = message_html } ;
+      html = { charset = (match message_html with Some "" | None -> "" | _ -> charset);
+               data = (match message_html with | Some m -> m | None -> "") } ;
       text = { charset = (match message_text with Some "" | None -> "" | _ -> charset);
                data = (match message_text with | Some m -> m | None -> "") }
     }
